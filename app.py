@@ -1,7 +1,9 @@
 import sqlite3
+import calendar
 from datetime import datetime, date, timedelta
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 # -----------------------------------------------------------------------------
 # 1. 資料庫初始化與操作函式
@@ -74,7 +76,7 @@ def get_target_settings():
         "target_p": 140.0,
         "target_carbs": 250.0,
         "target_fat": 60.0,
-        "weekly_run_target": 30.0
+        "monthly_run_target": 120.0  # 客製化每月跑量目標 (預設 120 km)
     }
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -88,14 +90,14 @@ def get_target_settings():
             saved_settings[k] = v
     return saved_settings
 
-def save_target_settings(cal, p, carbs, fat, run_target):
+def save_target_settings(cal, p, carbs, fat, monthly_run_target):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_cal', ?)", (cal,))
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_p', ?)", (p,))
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_carbs', ?)", (carbs,))
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_fat', ?)", (fat,))
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('weekly_run_target', ?)", (run_target,))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('monthly_run_target', ?)", (monthly_run_target,))
     conn.commit()
     conn.close()
 
@@ -147,16 +149,18 @@ def delete_workout(workout_id):
     conn.commit()
     conn.close()
 
-# --- 慢跑數據統計 (本週與跑鞋) ---
-def get_weekly_running_distance(target_date):
+# --- 當月跑量統計 (依據當月第一天到最後一天) ---
+def get_monthly_running_distance(target_date):
     conn = sqlite3.connect(DB_FILE)
-    # 找到目標日期所在週的週一與週日
-    start_of_week = target_date - timedelta(days=target_date.weekday())
-    end_of_week = start_of_week + timedelta(days=6)
+    
+    # 計算當月第一天與最後一天
+    first_day = date(target_date.year, target_date.month, 1)
+    last_day_num = calendar.monthrange(target_date.year, target_date.month)[1]
+    last_day = date(target_date.year, target_date.month, last_day_num)
     
     df = pd.read_sql_query(
         "SELECT SUM(distance) as total FROM workouts WHERE workout_type = '慢跑' AND log_date >= ? AND log_date <= ?",
-        conn, params=(start_of_week.strftime("%Y-%m-%d"), end_of_week.strftime("%Y-%m-%d"))
+        conn, params=(first_day.strftime("%Y-%m-%d"), last_day.strftime("%Y-%m-%d"))
     )
     conn.close()
     return df["total"].iloc[0] if df["total"].iloc[0] is not None else 0.0
@@ -178,7 +182,7 @@ def get_running_history():
     )
     conn.close()
     if not df.empty:
-        df["pace_decimal"] = df["duration_min"] / df["distance"]  # 分鐘/公里
+        df["pace_decimal"] = df["duration_min"] / df["distance"]  # 分鐘/公里 (數值型態)
         df["配速"] = df.apply(lambda r: calculate_pace(r["distance"], r["duration_min"]), axis=1)
     return df
 
@@ -230,18 +234,18 @@ st.title("🥗 每日營養與運動紀錄器")
 
 saved_targets = get_target_settings()
 
-# 側邊欄：目標設定
-st.sidebar.header("🎯 每日與每週目標設定")
+# 側邊欄：目標設定 (支援客製化每月跑量)
+st.sidebar.header("🎯 每日與每月目標設定")
 with st.sidebar.form("target_settings_form"):
     target_cal = st.number_input("目標熱量 (kcal)", value=int(saved_targets["target_cal"]), step=50)
     target_p = st.number_input("目標蛋白質 (g)", value=int(saved_targets["target_p"]), step=5)
     target_carbs = st.number_input("目標碳水化合物 (g)", value=int(saved_targets["target_carbs"]), step=5)
     target_fat = st.number_input("目標脂肪 (g)", value=int(saved_targets["target_fat"]), step=5)
-    weekly_run_target = st.number_input("本週目標跑量 (km)", value=float(saved_targets["weekly_run_target"]), step=5.0)
+    monthly_run_target = st.number_input("每月目標跑量 (km)", value=float(saved_targets.get("monthly_run_target", 120.0)), step=10.0)
     
     submit_targets = st.form_submit_button("💾 儲存目標設定", use_container_width=True)
     if submit_targets:
-        save_target_settings(target_cal, target_p, target_carbs, target_fat, weekly_run_target)
+        save_target_settings(target_cal, target_p, target_carbs, target_fat, monthly_run_target)
         st.sidebar.success("目標設定已成功更新！")
         st.rerun()
 
@@ -258,12 +262,12 @@ if not shoe_df.empty:
 else:
     st.sidebar.caption("尚無跑鞋紀錄")
 
-# 側邊欄：圖表顯示開關設定（已換成新的圖示 ⚙️）
+# 側邊欄：圖表顯示開關設定
 st.sidebar.divider()
 st.sidebar.header("⚙️ 介面與圖表顯示設定")
 show_cal_chart = st.sidebar.checkbox("顯示 熱量與營養趨勢圖", value=True)
 show_pace_hr_chart = st.sidebar.checkbox("顯示 慢跑心率 vs. 配速散佈圖", value=True)
-show_run_chart = st.sidebar.checkbox("顯示 慢跑每週里程圖", value=True)
+show_run_chart = st.sidebar.checkbox("顯示 慢跑近7天里程圖", value=True)
 show_gym_chart = st.sidebar.checkbox("顯示 重訓總量趨勢圖", value=False)
 show_part_chart = st.sidebar.checkbox("顯示 重訓部位分布圖", value=False)
 
@@ -279,7 +283,7 @@ if not all_df.empty:
         mime="text/csv"
     )
 
-# 主畫面日期選擇器 (改回日曆視圖)
+# 主畫面日期選擇器 (日曆視圖)
 st.divider()
 selected_date = st.date_input("📅 選擇紀錄/查閱日期", value=date.today())
 date_str = selected_date.strftime("%Y-%m-%d")
@@ -365,7 +369,7 @@ with tab_exercise:
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# 4. 當日進度與每週跑量目標條
+# 4. 當日進度與「當月」跑量目標條（精準 01號 到 當月最後一天）
 # -----------------------------------------------------------------------------
 logs_df = get_logs_by_date(date_str)
 workouts_df = get_workouts_by_date(date_str)
@@ -389,12 +393,13 @@ m2.metric("蛋白質剩餘", f"{rem_p:.1f} g", delta=f"已攝取 {consumed_p:.1f
 m3.metric("碳水剩餘", f"{rem_carbs:.1f} g", delta=f"已攝取 {consumed_carbs:.1f}")
 m4.metric("脂肪剩餘", f"{rem_f:.1f} g", delta=f"已攝取 {consumed_f:.1f}")
 
-# 每週跑量目標進度條
-weekly_dist = get_weekly_running_distance(selected_date)
-run_pct = min(weekly_dist / weekly_run_target, 1.0) if weekly_run_target > 0 else 0.0
-rem_run = max(weekly_run_target - weekly_dist, 0.0)
+# 當月跑量目標進度條 (精準從 1號 到當月最後一天)
+monthly_dist = get_monthly_running_distance(selected_date)
+run_pct = min(monthly_dist / monthly_run_target, 1.0) if monthly_run_target > 0 else 0.0
+rem_run = max(monthly_run_target - monthly_dist, 0.0)
 
-st.markdown(f"🏃 **本週累積跑量：{weekly_dist:.2f} / {weekly_run_target:.1f} km** (還差 {rem_run:.2f} km)")
+last_day_of_month = calendar.monthrange(selected_date.year, selected_date.month)[1]
+st.markdown(f"🏃 **{selected_date.year} 年 {selected_date.month} 月累積跑量 (1日~{last_day_of_month}日)：{monthly_dist:.2f} / {monthly_run_target:.1f} km** (還差 {rem_run:.2f} km)")
 st.progress(run_pct)
 
 # -----------------------------------------------------------------------------
@@ -461,7 +466,7 @@ with list_tab2:
         st.info("當天尚無運動紀錄。")
 
 # -----------------------------------------------------------------------------
-# 6. 趨勢與進階分析圖表 (控制開關與慢跑日期顯示)
+# 6. 趨勢與進階分析圖表 (互動式散佈圖 Hover 含日期)
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📈 歷史數據與慢跑進階分析")
@@ -495,24 +500,39 @@ if show_cal_chart:
     st.line_chart(daily_summary, x="日期", y="攝取熱量(kcal)", color="#FF4B4B")
     st.line_chart(daily_summary, x="日期", y=["蛋白質(g)", "碳水(g)", "脂肪(g)"])
 
-# 慢跑配速 vs. 心率散佈圖（包含完整日期與對照明細表）
+# 慢跑配速 vs. 心率散佈圖 (Plotly 點點 Hover 顯示日期、移除下方表格)
 if show_pace_hr_chart:
     st.markdown("#### 🏃 慢跑心率 vs. 配速散佈圖 (心肺效率)")
     run_hist_df = get_running_history()
     if not run_hist_df.empty and run_hist_df["avg_hr"].notna().any():
-        st.caption("💡 點落在**右下方**代表相同心率下配速更快（心肺耐力提升）。")
-        st.scatter_chart(
+        st.caption("💡 點擊或懸停在數據點上可查看**日期**與詳細數據。右下方代表相同心率下配速更快。")
+        
+        # 使用 Plotly 繪製具備完整 Hover 資訊的散佈圖
+        fig = px.scatter(
             run_hist_df,
             x="avg_hr",
             y="pace_decimal",
-            color="shoe" if "shoe" in run_hist_df.columns else None
+            color="shoe" if "shoe" in run_hist_df.columns else None,
+            hover_data={
+                "log_date": True,     # 顯示日期
+                "配速": True,          # 顯示格式化配速 (例如 05'30")
+                "avg_hr": True,        # 平均心率
+                "distance": ":.2f",    # 距離
+                "item": True,          # 項目名稱
+                "pace_decimal": False  # 隱藏浮點數配速
+            },
+            labels={
+                "avg_hr": "平均心率 (bpm)",
+                "pace_decimal": "配速 (分鐘/公里)",
+                "shoe": "跑鞋",
+                "log_date": "日期",
+                "distance": "距離 (km)",
+                "item": "項目"
+            }
         )
-        
-        # 新增：包含日期的詳細數據明細表
-        with st.expander("📄 檢視慢跑歷史數據明細 (含日期、配速、心率)"):
-            display_run_df = run_hist_df[["log_date", "item", "distance", "配速", "avg_hr", "shoe"]].copy()
-            display_run_df.columns = ["日期", "項目", "距離(km)", "平均配速", "平均心率(bpm)", "使用跑鞋"]
-            st.dataframe(display_run_df, use_container_width=True)
+        fig.update_traces(marker=dict(size=10, opacity=0.8))
+        fig.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("尚無包含平均心率的慢跑紀錄，填寫心率後即可自動生成散佈圖。")
 
