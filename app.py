@@ -183,9 +183,23 @@ def calculate_pace(distance, duration_min):
 init_db()
 
 # -----------------------------------------------------------------------------
-# 2. Streamlit 介面配置
+# 2. Streamlit 介面與 CSS 配置
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="每日營養與運動紀錄器", page_icon="🥗", layout="centered")
+
+# 防止 date_input 觸發虛擬鍵盤的 CSS
+st.markdown("""
+    <style>
+    /* 隱藏 DateInput 內部 input 欄位的文字輸入焦點與游標 */
+    div[data-baseweb="input"] input {
+        caret-color: transparent !important;
+        pointer-events: none;
+    }
+    div[data-baseweb="input"] {
+        cursor: pointer;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 st.title("🥗 每日營養與運動紀錄器")
 
@@ -218,7 +232,7 @@ if not all_df.empty:
         mime="text/csv"
     )
 
-# 日期選擇器
+# 日期選擇器 (已修正為純日曆彈出)
 st.divider()
 selected_date = st.date_input("📅 選擇紀錄/查閱日期", value=date.today())
 date_str = selected_date.strftime("%Y-%m-%d")
