@@ -264,46 +264,45 @@ def calculate_pace(distance, duration_min):
 init_db()
 
 # -----------------------------------------------------------------------------
-# 2. Streamlit 介面配置與灰藍色樣式注入 (CSS)
+# 2. Streamlit 介面配置與灰藍色 CSS 主題覆蓋
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="每日營養與運動紀錄器", page_icon="🥗", layout="centered")
 
-# 注入灰藍色調自訂 CSS 樣式
+# 全域灰藍色主題 CSS 覆蓋
 st.markdown("""
     <style>
-    /* 灰藍色風格客製化 */
-    :root {
-        --slate-blue: #5A738E;
-        --slate-blue-dark: #4A607A;
-        --slate-blue-light: #EBF0F5;
-        --slate-blue-bg: #F4F7FA;
-    }
+    /* 主色調：灰藍色 (#5A738E) / 暗灰藍 (#4A607A) / 淺灰藍 (#EBF0F5) */
     
-    /* Multiselect 選項標籤改為灰藍色 */
+    /* Multiselect 選項標籤 (Tags) 統一灰藍色 */
     span[data-baseweb="tag"] {
-        background-color: var(--slate-blue) !important;
+        background-color: #5A738E !important;
         color: #ffffff !important;
         border-radius: 6px !important;
-        padding: 4px 8px !important;
+        padding: 5px 10px !important;
+        cursor: grab !important;
     }
     
-    /* 區塊容器樣式 */
-    div[data-testid="stForm"] {
-        border-radius: 10px;
+    /* 側邊欄 Multiselect 控制盒拉長高 */
+    div[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        min-height: 240px !important;
+        background-color: #F8FAFC !important;
+        border: 1.5px solid #CBD5E1 !important;
+        border-radius: 8px !important;
+        align-items: flex-start !important;
     }
     
-    /* 自訂主區塊外框灰藍主題 */
-    .slate-box {
-        background-color: var(--slate-blue-bg);
-        border: 1.5px solid #CBD5E1;
-        border-radius: 12px;
-        padding: 18px;
-        margin-bottom: 15px;
+    /* 按鈕與提示框灰藍色調 */
+    .stButton > button {
+        border-radius: 8px !important;
+    }
+    .stButton > button[kind="primary"] {
+        background-color: #5A738E !important;
+        border-color: #5A738E !important;
     }
     
-    /* 進度條顏色覆蓋為灰藍色 */
+    /* 進度條改為灰藍色 */
     .stProgress > div > div > div > div {
-        background-color: var(--slate-blue) !important;
+        background-color: #5A738E !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -312,7 +311,7 @@ st.title("🥗 每日營養與運動紀錄器")
 
 saved_targets = get_target_settings()
 
-# 側邊欄：目標設定
+# --- 側邊欄配置 ---
 st.sidebar.header("🎯 每日營養目標設定")
 with st.sidebar.form("target_settings_form"):
     target_cal = st.number_input("目標熱量 (kcal)", value=int(saved_targets["target_cal"]), step=50)
@@ -325,6 +324,39 @@ with st.sidebar.form("target_settings_form"):
         save_target_settings(target_cal, target_p, target_carbs, target_fat)
         st.sidebar.success("目標設定已成功更新！")
         st.rerun()
+
+# 側邊欄：拉長區塊與支援拖曳的順序設定
+st.sidebar.divider()
+st.sidebar.header("🔀 畫面區塊顯示與順序設定")
+st.sidebar.caption("💡 **如何調整順序**：滑鼠按住灰藍色標籤**直接拖曳**即可調整上下顯示順序；點擊 'x' 可隱藏區塊。")
+
+ALL_SECTIONS = [
+    "新增紀錄區塊",
+    "當日攝取進度與目標",
+    "當月跑量統計區塊",
+    "當日明細清單",
+    "近30天體重趨勢圖",
+    "熱量與營養趨勢圖",
+    "慢跑心率 vs. 配速散佈圖",
+    "慢跑近7天里程圖",
+    "重訓總量趨勢圖",
+    "重訓部位分布圖"
+]
+
+selected_sections = st.sidebar.multiselect(
+    "調整顯示與拖曳順序：",
+    options=ALL_SECTIONS,
+    default=[
+        "新增紀錄區塊",
+        "當日攝取進度與目標",
+        "當月跑量統計區塊",
+        "當日明細清單",
+        "近30天體重趨勢圖",
+        "熱量與營養趨勢圖",
+        "慢跑心率 vs. 配速散佈圖",
+        "慢跑近7天里程圖"
+    ]
+)
 
 # 側邊欄：跑鞋履歷統計
 st.sidebar.divider()
@@ -351,46 +383,10 @@ if not all_df.empty:
         mime="text/csv"
     )
 
-# -----------------------------------------------------------------------------
-# 主畫面頂部：日期選擇與放大的灰藍色顯示/順序設定區塊
-# -----------------------------------------------------------------------------
+# --- 主畫面日期選擇器 ---
 st.divider()
 selected_date = st.date_input("📅 選擇紀錄/查閱日期", value=date.today())
 date_str = selected_date.strftime("%Y-%m-%d")
-
-# 加大版的區塊順序與顯示控制卡片
-ALL_SECTIONS = [
-    "新增紀錄區塊",
-    "當日攝取進度與目標",
-    "當月跑量統計區塊",
-    "當日明細清單",
-    "近30天體重趨勢圖",
-    "熱量與營養趨勢圖",
-    "慢跑心率 vs. 配速散佈圖",
-    "慢跑近7天里程圖",
-    "重訓總量趨勢圖",
-    "重訓部位分布圖"
-]
-
-with st.container(border=True):
-    st.markdown("<h4 style='color: #4A607A; margin-bottom: 0px;'>🔀 畫面區塊顯示與顯示順序設定</h4>", unsafe_allow_html=True)
-    st.caption("提示：點擊標籤旁的 'x' 可隱藏區塊，也可直接拖拉標籤重新排列版面顯示順序。")
-    
-    selected_sections = st.multiselect(
-        "版面區塊與顯示順序：",
-        options=ALL_SECTIONS,
-        default=[
-            "新增紀錄區塊",
-            "當日攝取進度與目標",
-            "當月跑量統計區塊",
-            "當日明細清單",
-            "近30天體重趨勢圖",
-            "熱量與營養趨勢圖",
-            "慢跑心率 vs. 配速散佈圖",
-            "慢跑近7天里程圖"
-        ],
-        label_visibility="collapsed"
-    )
 
 # -----------------------------------------------------------------------------
 # 3. 區塊渲染邏輯（動態依據 selected_sections 順序繪製）
@@ -498,7 +494,6 @@ def render_daily_progress():
 
     st.subheader(f"📊 {date_str} 攝取進度與目標")
 
-    # 顯示當日體重
     weight_df = get_weight_by_date(date_str)
     if not weight_df.empty:
         w_val = weight_df["weight"].iloc[0]
@@ -627,7 +622,7 @@ def render_pace_hr_chart():
         scatter_chart = alt.Chart(run_hist_df).mark_circle(size=90).encode(
             x=alt.X('avg_hr:Q', title='平均心率 (bpm)', scale=alt.Scale(zero=False)),
             y=alt.Y('pace_decimal:Q', title='配速 (分鐘/km)', scale=alt.Scale(zero=False, reverse=True)),
-            color=alt.Color('shoe:N', title='跑鞋', scale=alt.Scale(scheme='tableau10')),
+            color=alt.Color('shoe:N', title='跑鞋'),
             tooltip=[
                 alt.Tooltip('log_date:N', title='日期'),
                 alt.Tooltip('item:N', title='項目'),
@@ -652,7 +647,7 @@ def render_run_chart():
     else:
         workout_summary = pd.DataFrame({"log_date": date_range, "distance": [0.0]*7})
     workout_summary.rename(columns={"log_date": "日期", "distance": "慢跑里程(km)"}, inplace=True)
-    st.bar_chart(workout_summary, x="日期", y="慢跑里程(km)", color="#4A607A")
+    st.bar_chart(workout_summary, x="日期", y="慢跑里程(km)", color="#5A738E")
 
 def render_gym_chart():
     st.markdown("#### 🏋️ 近 7 天重訓總量")
@@ -665,7 +660,7 @@ def render_gym_chart():
     else:
         workout_summary = pd.DataFrame({"log_date": date_range, "volume_kg": [0.0]*7})
     workout_summary.rename(columns={"log_date": "日期", "volume_kg": "重訓總量(kg)"}, inplace=True)
-    st.bar_chart(workout_summary, x="日期", y="重訓總量(kg)", color="#78909C")
+    st.bar_chart(workout_summary, x="日期", y="重訓總量(kg)", color="#4A607A")
 
 def render_part_chart():
     st.markdown("#### 📊 近 7 天重訓部位分布")
