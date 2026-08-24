@@ -39,7 +39,7 @@ def init_db():
             rpe REAL
         )
     ''')
-    # 設定值儲存表 (永久保存每日目標)
+    # 設定值儲存表
     c.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -47,7 +47,6 @@ def init_db():
         )
     ''')
     
-    # 自動補齊舊版 workouts 資料表可能缺失的欄位
     existing_cols = [col[1] for col in c.execute("PRAGMA table_info(workouts)").fetchall()]
     new_cols = {
         "workout_type": "TEXT",
@@ -179,34 +178,44 @@ def calculate_pace(distance, duration_min):
         return f"{pace_min:02d}'{pace_sec:02d}\""
     return "-"
 
+# 自訂下拉選單式日期選擇器（絕不跳出輸入鍵盤）
+def render_dropdown_date_picker():
+    st.write("📅 **選擇紀錄/查閱日期**")
+    today = date.today()
+    col_y, col_m, col_d = st.columns(3)
+    
+    with col_y:
+        selected_year = st.selectbox("年", list(range(today.year - 1, today.year + 2)), index=1, label_visibility="collapsed")
+    with col_m:
+        selected_month = st.selectbox("月", list(range(1, 13)), index=today.month - 1, label_visibility="collapsed")
+    
+    if selected_month in [1, 3, 5, 7, 8, 10, 12]:
+        max_days = 31
+    elif selected_month in [4, 6, 9, 11]:
+        max_days = 30
+    else:
+        is_leap = (selected_year % 4 == 0 and selected_year % 100 != 0) or (selected_year % 400 == 0)
+        max_days = 29 if is_leap else 28
+        
+    with col_d:
+        day_index = min(today.day - 1, max_days - 1)
+        selected_day = st.selectbox("日", list(range(1, max_days + 1)), index=day_index, label_visibility="collapsed")
+        
+    return date(selected_year, selected_month, selected_day)
+
 # 初始化資料庫
 init_db()
 
 # -----------------------------------------------------------------------------
-# 2. Streamlit 介面與 CSS 配置
+# 2. Streamlit 介面配置
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="每日營養與運動紀錄器", page_icon="🥗", layout="centered")
 
-# 防止 date_input 觸發虛擬鍵盤的 CSS
-st.markdown("""
-    <style>
-    /* 隱藏 DateInput 內部 input 欄位的文字輸入焦點與游標 */
-    div[data-baseweb="input"] input {
-        caret-color: transparent !important;
-        pointer-events: none;
-    }
-    div[data-baseweb="input"] {
-        cursor: pointer;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 st.title("🥗 每日營養與運動紀錄器")
 
-# 讀取已儲存的目標設定
 saved_targets = get_target_settings()
 
-# 側邊欄：目標設定 (表單化儲存)
+# 側邊欄：目標設定
 st.sidebar.header("🎯 每日營養目標")
 with st.sidebar.form("target_settings_form"):
     target_cal = st.number_input("目標熱量 (kcal)", value=int(saved_targets["target_cal"]), step=50)
@@ -232,9 +241,9 @@ if not all_df.empty:
         mime="text/csv"
     )
 
-# 日期選擇器 (已修正為純日曆彈出)
+# 日期選擇器 (改為下拉選單，完全阻擋鍵盤)
 st.divider()
-selected_date = st.date_input("📅 選擇紀錄/查閱日期", value=date.today())
+selected_date = render_dropdown_date_picker()
 date_str = selected_date.strftime("%Y-%m-%d")
 
 # -----------------------------------------------------------------------------
@@ -343,7 +352,6 @@ m2.metric("蛋白質剩餘", f"{rem_p:.1f} g", delta=f"已攝取 {consumed_p:.1f
 m3.metric("碳水剩餘", f"{rem_carbs:.1f} g", delta=f"已攝取 {consumed_carbs:.1f}")
 m4.metric("脂肪剩餘", f"{rem_f:.1f} g", delta=f"已攝取 {consumed_f:.1f}")
 
-# 當日運動數據速覽
 if not workouts_df.empty:
     run_dist_today = workouts_df["distance"].sum()
     vol_today = workouts_df["volume_kg"].sum()
@@ -428,10 +436,8 @@ recent_logs_df, recent_workouts_df = get_recent_logs(days=7)
 today_dt = date.today()
 date_range = [(today_dt - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
 
-# 飲食數據整理
 food_summary = recent_logs_df.groupby("log_date").sum().reindex(date_range).fillna(0) if not recent_logs_df.empty else pd.DataFrame(0, index=date_range, columns=["calories", "protein", "carbs", "fat"])
 
-# 運動數據整理
 if not recent_workouts_df.empty:
     workout_summary = recent_workouts_df.groupby("log_date").agg({
         "calories_burned": "sum",
