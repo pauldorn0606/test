@@ -36,10 +36,11 @@ def init_db():
             avg_hr REAL,
             body_part TEXT,
             volume_kg REAL,
-            rpe REAL
+            rpe REAL,
+            shoe TEXT
         )
     ''')
-    # 設定值儲存表 (永久保存每日目標)
+    # 設定值儲存表
     c.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -47,7 +48,7 @@ def init_db():
         )
     ''')
     
-    # 自動補齊舊版 workouts 資料表可能缺失的欄位
+    # 動態補齊新欄位
     existing_cols = [col[1] for col in c.execute("PRAGMA table_info(workouts)").fetchall()]
     new_cols = {
         "workout_type": "TEXT",
@@ -56,7 +57,8 @@ def init_db():
         "avg_hr": "REAL",
         "body_part": "TEXT",
         "volume_kg": "REAL",
-        "rpe": "REAL"
+        "rpe": "REAL",
+        "shoe": "TEXT"
     }
     for col_name, col_type in new_cols.items():
         if col_name not in existing_cols:
@@ -71,7 +73,8 @@ def get_target_settings():
         "target_cal": 2200.0,
         "target_p": 140.0,
         "target_carbs": 250.0,
-        "target_fat": 60.0
+        "target_fat": 60.0,
+        "weekly_run_target": 30.0
     }
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -85,13 +88,14 @@ def get_target_settings():
             saved_settings[k] = v
     return saved_settings
 
-def save_target_settings(cal, p, carbs, fat):
+def save_target_settings(cal, p, carbs, fat, run_target):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_cal', ?)", (cal,))
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_p', ?)", (p,))
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_carbs', ?)", (carbs,))
     c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_fat', ?)", (fat,))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('weekly_run_target', ?)", (run_target,))
     conn.commit()
     conn.close()
 
@@ -120,13 +124,13 @@ def delete_log(log_id):
     conn.close()
 
 # --- 運動 DB 操作 ---
-def add_workout(log_date, item, calories_burned, workout_type, distance=None, duration_min=None, avg_hr=None, body_part=None, volume_kg=None, rpe=None):
+def add_workout(log_date, item, calories_burned, workout_type, distance=None, duration_min=None, avg_hr=None, body_part=None, volume_kg=None, rpe=None, shoe=None):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''
-        INSERT INTO workouts (log_date, item, calories_burned, workout_type, distance, duration_min, avg_hr, body_part, volume_kg, rpe)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (log_date, item, calories_burned, workout_type, distance, duration_min, avg_hr, body_part, volume_kg, rpe))
+        INSERT INTO workouts (log_date, item, calories_burned, workout_type, distance, duration_min, avg_hr, body_part, volume_kg, rpe, shoe)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (log_date, item, calories_burned, workout_type, distance, duration_min, avg_hr, body_part, volume_kg, rpe, shoe))
     conn.commit()
     conn.close()
 
@@ -142,6 +146,40 @@ def delete_workout(workout_id):
     c.execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
     conn.commit()
     conn.close()
+
+# --- 慢跑數據統計 (本週與跑鞋) ---
+def get_weekly_running_distance(target_date):
+    conn = sqlite3.connect(DB_FILE)
+    # 找到目標日期所在週的週一與週日
+    start_of_week = target_date - timedelta(days=target_date.weekday())
+    end_of_week = start_of_week + timedelta(days=6)
+    
+    df = pd.read_sql_query(
+        "SELECT SUM(distance) as total FROM workouts WHERE workout_type = '慢跑' AND log_date >= ? AND log_date <= ?",
+        conn, params=(start_of_week.strftime("%Y-%m-%d"), end_of_week.strftime("%Y-%m-%d"))
+    )
+    conn.close()
+    return df["total"].iloc[0] if df["total"].iloc[0] is not None else 0.0
+
+def get_shoe_mileage():
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query(
+        "SELECT shoe, SUM(distance) as total_dist FROM workouts WHERE workout_type = '慢跑' AND shoe IS NOT NULL AND shoe != '' GROUP BY shoe",
+        conn
+    )
+    conn.close()
+    return df
+
+def get_running_history():
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query(
+        "SELECT log_date, item, distance, duration_min, avg_hr, shoe FROM workouts WHERE workout_type = '慢跑' AND distance > 0 AND duration_min > 0",
+        conn
+    )
+    conn.close()
+    if not df.empty:
+        df["pace_decimal"] = df["duration_min"] / df["distance"]  # 分鐘/公里
+    return df
 
 # --- 歷史與匯出 ---
 def get_recent_logs(days=7):
@@ -162,8 +200,8 @@ def get_recent_logs(days=7):
 
 def get_all_logs():
     conn = sqlite3.connect(DB_FILE)
-    logs_df = pd.read_sql_query("SELECT '飲食' as 類別, log_date, item, calories, protein, carbs, fat, NULL as calories_burned, NULL as workout_type, NULL as distance, NULL as duration_min, NULL as avg_hr, NULL as body_part, NULL as volume_kg, NULL as rpe FROM logs", conn)
-    workouts_df = pd.read_sql_query("SELECT '運動' as 類別, log_date, item, NULL as calories, NULL as protein, NULL as carbs, NULL as fat, calories_burned, workout_type, distance, duration_min, avg_hr, body_part, volume_kg, rpe FROM workouts", conn)
+    logs_df = pd.read_sql_query("SELECT '飲食' as 類別, log_date, item, calories, protein, carbs, fat, NULL as calories_burned, NULL as workout_type, NULL as distance, NULL as duration_min, NULL as avg_hr, NULL as body_part, NULL as volume_kg, NULL as rpe, NULL as shoe FROM logs", conn)
+    workouts_df = pd.read_sql_query("SELECT '運動' as 類別, log_date, item, NULL as calories, NULL as protein, NULL as carbs, NULL as fat, calories_burned, workout_type, distance, duration_min, avg_hr, body_part, volume_kg, rpe, shoe FROM workouts", conn)
     conn.close()
     combined = pd.concat([logs_df, workouts_df]).sort_values(by=["log_date"], ascending=False)
     return combined
@@ -179,32 +217,79 @@ def calculate_pace(distance, duration_min):
         return f"{pace_min:02d}'{pace_sec:02d}\""
     return "-"
 
+# 下拉選單式日期選擇器（防鍵盤）
+def render_dropdown_date_picker():
+    st.write("📅 **選擇紀錄/查閱日期**")
+    today = date.today()
+    col_y, col_m, col_d = st.columns(3)
+    
+    with col_y:
+        selected_year = st.selectbox("年", list(range(today.year - 1, today.year + 2)), index=1, label_visibility="collapsed")
+    with col_m:
+        selected_month = st.selectbox("月", list(range(1, 13)), index=today.month - 1, label_visibility="collapsed")
+    
+    if selected_month in [1, 3, 5, 7, 8, 10, 12]:
+        max_days = 31
+    elif selected_month in [4, 6, 9, 11]:
+        max_days = 30
+    else:
+        is_leap = (selected_year % 4 == 0 and selected_year % 100 != 0) or (selected_year % 400 == 0)
+        max_days = 29 if is_leap else 28
+        
+    with col_d:
+        day_index = min(today.day - 1, max_days - 1)
+        selected_day = st.selectbox("日", list(range(1, max_days + 1)), index=day_index, label_visibility="collapsed")
+        
+    return date(selected_year, selected_month, selected_day)
+
 # 初始化資料庫
 init_db()
 
 # -----------------------------------------------------------------------------
-# 2. Streamlit 介面配置
+# 2. Streamlit 介面配置與側邊欄
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="每日營養與運動紀錄器", page_icon="🥗", layout="centered")
 
 st.title("🥗 每日營養與運動紀錄器")
 
-# 讀取已儲存的目標設定
 saved_targets = get_target_settings()
 
-# 側邊欄：目標設定 (表單化儲存)
-st.sidebar.header("🎯 每日營養目標")
+# 側邊欄：目標設定
+st.sidebar.header("🎯 每日與每週目標設定")
 with st.sidebar.form("target_settings_form"):
     target_cal = st.number_input("目標熱量 (kcal)", value=int(saved_targets["target_cal"]), step=50)
     target_p = st.number_input("目標蛋白質 (g)", value=int(saved_targets["target_p"]), step=5)
     target_carbs = st.number_input("目標碳水化合物 (g)", value=int(saved_targets["target_carbs"]), step=5)
     target_fat = st.number_input("目標脂肪 (g)", value=int(saved_targets["target_fat"]), step=5)
+    weekly_run_target = st.number_input("本週目標跑量 (km)", value=float(saved_targets["weekly_run_target"]), step=5.0)
     
     submit_targets = st.form_submit_button("💾 儲存目標設定", use_container_width=True)
     if submit_targets:
-        save_target_settings(target_cal, target_p, target_carbs, target_fat)
-        st.sidebar.success("目標設定已成功永久保存！")
+        save_target_settings(target_cal, target_p, target_carbs, target_fat, weekly_run_target)
+        st.sidebar.success("目標設定已成功更新！")
         st.rerun()
+
+# 側邊欄：跑鞋履歷統計
+st.sidebar.divider()
+st.sidebar.header("👟 跑鞋退役里程追蹤")
+shoe_df = get_shoe_mileage()
+if not shoe_df.empty:
+    for _, row in shoe_df.iterrows():
+        s_name = row['shoe']
+        s_dist = row['total_dist']
+        st.sidebar.write(f"**{s_name}**: {s_dist:.1f} km / 600 km")
+        st.sidebar.progress(min(s_dist / 600.0, 1.0))
+else:
+    st.sidebar.caption("尚無跑鞋紀錄")
+
+# 側邊欄：圖表顯示開關設定 (自訂欄位/隱藏功能)
+st.sidebar.divider()
+st.sidebar.header("👁️ 圖表顯示設定")
+show_cal_chart = st.sidebar.checkbox("顯示 熱量與營養趨勢圖", value=True)
+show_pace_hr_chart = st.sidebar.checkbox("顯示 慢跑心率 vs. 配速散佈圖", value=True)
+show_run_chart = st.sidebar.checkbox("顯示 慢跑每週里程圖", value=True)
+show_gym_chart = st.sidebar.checkbox("顯示 重訓總量趨勢圖", value=False)
+show_part_chart = st.sidebar.checkbox("顯示 重訓部位分布圖", value=False)
 
 st.sidebar.divider()
 st.sidebar.header("💾 資料備份")
@@ -218,9 +303,9 @@ if not all_df.empty:
         mime="text/csv"
     )
 
-# 日期選擇器
+# 主畫面日期選擇器
 st.divider()
-selected_date = st.date_input("📅 選擇紀錄/查閱日期", value=date.today())
+selected_date = render_dropdown_date_picker()
 date_str = selected_date.strftime("%Y-%m-%d")
 
 # -----------------------------------------------------------------------------
@@ -263,6 +348,7 @@ with tab_exercise:
             with col_a:
                 dist_in = st.number_input("跑步距離 (km)", min_value=0.0, value=None, placeholder="0.0", step=0.1)
                 duration_in = st.number_input("時間 (分鐘)", min_value=0.0, value=None, placeholder="0", step=1.0)
+                shoe_in = st.selectbox("使用跑鞋", ["Adidas Boston 13", "Adidas Adizero", "其他/不指定"])
             with col_b:
                 hr_in = st.number_input("平均心率 (bpm)", min_value=0, value=None, placeholder="0", step=1)
                 cal_burned_in = st.number_input("消耗熱量 (kcal)", min_value=0.0, value=None, placeholder="0", step=10.0)
@@ -270,8 +356,8 @@ with tab_exercise:
             submit_workout = st.form_submit_button("加入慢跑紀錄", use_container_width=True)
             if submit_workout:
                 b_val = cal_burned_in if cal_burned_in is not None else 0.0
-                add_workout(date_str, workout_name, b_val, "慢跑", distance=dist_in, duration_min=duration_in, avg_hr=hr_in)
-                st.toast(f"已加入慢跑紀錄：{dist_in or 0} km")
+                add_workout(date_str, workout_name, b_val, "慢跑", distance=dist_in, duration_min=duration_in, avg_hr=hr_in, shoe=shoe_in)
+                st.toast(f"已加入慢跑紀錄：{dist_in or 0} km ({shoe_in})")
                 st.rerun()
 
         elif workout_category == "🏋️ 重訓/健身":
@@ -281,7 +367,7 @@ with tab_exercise:
                 body_part_in = st.selectbox("主要訓練部位", ["胸部", "背部", "腿部", "肩部", "手臂", "核心", "全身/其他"])
                 vol_in = st.number_input("總訓練量 Volume (kg)", min_value=0.0, value=None, placeholder="重量x組數x次數", step=50.0)
             with col_b:
-                rpe_in = st.slider("自覺強度 (RPE 1-10)", min_value=1, max_value=10, value=7, help="10為極限，7-8為常規訓練強度")
+                rpe_in = st.slider("自覺強度 (RPE 1-10)", min_value=1, max_value=10, value=7)
                 cal_burned_in = st.number_input("估計消耗熱量 (kcal)", min_value=0.0, value=None, placeholder="0", step=10.0)
             
             submit_workout = st.form_submit_button("加入重訓紀錄", use_container_width=True)
@@ -303,7 +389,7 @@ with tab_exercise:
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# 4. 當日進度與數據計算
+# 4. 當日進度與每週跑量目標條
 # -----------------------------------------------------------------------------
 logs_df = get_logs_by_date(date_str)
 workouts_df = get_workouts_by_date(date_str)
@@ -313,10 +399,8 @@ consumed_p = logs_df["protein"].sum() if not logs_df.empty else 0.0
 consumed_carbs = logs_df["carbs"].sum() if not logs_df.empty else 0.0
 consumed_f = logs_df["fat"].sum() if not logs_df.empty else 0.0
 
-burned_cal = workouts_df["calories_burned"].sum() if not workouts_df.empty else 0.0
-
 st.divider()
-st.subheader(f"📊 {date_str} 攝取進度與剩餘所需")
+st.subheader(f"📊 {date_str} 攝取進度與目標")
 
 rem_cal = target_cal - consumed_cal
 rem_p = target_p - consumed_p
@@ -329,17 +413,13 @@ m2.metric("蛋白質剩餘", f"{rem_p:.1f} g", delta=f"已攝取 {consumed_p:.1f
 m3.metric("碳水剩餘", f"{rem_carbs:.1f} g", delta=f"已攝取 {consumed_carbs:.1f}")
 m4.metric("脂肪剩餘", f"{rem_f:.1f} g", delta=f"已攝取 {consumed_f:.1f}")
 
-# 當日運動數據速覽
-if not workouts_df.empty:
-    run_dist_today = workouts_df["distance"].sum()
-    vol_today = workouts_df["volume_kg"].sum()
-    
-    info_str = f"🏃 今日運動消耗：**{burned_cal:.0f}** kcal"
-    if run_dist_today > 0:
-        info_str += f" | 慢跑總里程：**{run_dist_today:.2f}** km"
-    if vol_today > 0:
-        info_str += f" | 重訓總累積量：**{vol_today:.0f}** kg"
-    st.info(info_str)
+# 每週跑量目標進度條
+weekly_dist = get_weekly_running_distance(selected_date)
+run_pct = min(weekly_dist / weekly_run_target, 1.0) if weekly_run_target > 0 else 0.0
+rem_run = max(weekly_run_target - weekly_dist, 0.0)
+
+st.markdown(f"🏃 **本週累積跑量：{weekly_dist:.2f} / {weekly_run_target:.1f} km** (還差 {rem_run:.2f} km)")
+st.progress(run_pct)
 
 # -----------------------------------------------------------------------------
 # 5. 當日細項清單與刪除管理
@@ -377,13 +457,14 @@ with list_tab2:
                 
                 if w_type == "慢跑":
                     pace = calculate_pace(row["distance"], row["duration_min"])
+                    shoe_str = f" | 👟 {row['shoe']}" if row.get('shoe') else ""
                     st.write(
                         f"**🏃 {row['item']}** — "
                         f"**{row['distance'] or 0:.2f} km** | "
                         f"配速: **{pace}** | "
                         f"時間: {row['duration_min'] or 0:.0f}分 | "
-                        f"心率: {row['avg_hr'] or '-'} bpm | "
-                        f"消耗: {row['calories_burned']:.0f} kcal"
+                        f"心率: {row['avg_hr'] or '-'} bpm"
+                        f"{shoe_str}"
                     )
                 elif w_type == "重訓":
                     st.write(
@@ -404,20 +485,17 @@ with list_tab2:
         st.info("當天尚無運動紀錄。")
 
 # -----------------------------------------------------------------------------
-# 6. 近 7 天歷史趨勢與專屬運動圖表
+# 6. 趨勢與進階分析圖表 (可自由控制開關)
 # -----------------------------------------------------------------------------
 st.divider()
-st.subheader("📈 近 7 天數據趨勢分析")
+st.subheader("📈 歷史數據與慢跑進階分析")
 
 recent_logs_df, recent_workouts_df = get_recent_logs(days=7)
-
 today_dt = date.today()
 date_range = [(today_dt - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
 
-# 飲食數據整理
 food_summary = recent_logs_df.groupby("log_date").sum().reindex(date_range).fillna(0) if not recent_logs_df.empty else pd.DataFrame(0, index=date_range, columns=["calories", "protein", "carbs", "fat"])
 
-# 運動數據整理
 if not recent_workouts_df.empty:
     workout_summary = recent_workouts_df.groupby("log_date").agg({
         "calories_burned": "sum",
@@ -435,35 +513,45 @@ daily_summary.rename(columns={
     "distance": "慢跑里程(km)", "volume_kg": "重訓總量(kg)"
 }, inplace=True)
 
-chart_tab1, chart_tab2, chart_tab3, chart_tab4 = st.tabs([
-    "🔥 熱量與營養", 
-    "🏃 慢跑統計", 
-    "🏋️ 重訓統計", 
-    "📊 運動部位分布"
-])
-
-with chart_tab1:
+# 熱量圖表
+if show_cal_chart:
+    st.markdown("#### 🔥 熱量與三大營養素趨勢")
     st.line_chart(daily_summary, x="日期", y="攝取熱量(kcal)", color="#FF4B4B")
-    st.caption(f"目標參考線：每日飲食熱量 {target_cal} kcal")
     st.line_chart(daily_summary, x="日期", y=["蛋白質(g)", "碳水(g)", "脂肪(g)"])
 
-with chart_tab2:
+# 慢跑配速 vs. 心率散佈圖
+if show_pace_hr_chart:
+    st.markdown("#### 🏃 慢跑心率 vs. 配速散佈圖 (心肺效率)")
+    run_hist_df = get_running_history()
+    if not run_hist_df.empty and run_hist_df["avg_hr"].notna().any():
+        st.caption("💡 點落在**右下方**代表相同心率下配速更快（心肺耐力提升）。")
+        st.scatter_chart(
+            run_hist_df,
+            x="avg_hr",
+            y="pace_decimal",
+            color="shoe" if "shoe" in run_hist_df.columns else None
+        )
+    else:
+        st.info("尚無包含平均心率的慢跑紀錄，填寫心率後即可自動生成散佈圖。")
+
+# 近 7 天慢跑里程
+if show_run_chart:
+    st.markdown("#### 🏃 近 7 天慢跑里程")
     st.bar_chart(daily_summary, x="日期", y="慢跑里程(km)", color="#00C853")
-    total_7d_dist = daily_summary["慢跑里程(km)"].sum()
-    st.caption(f"近 7 天累計跑量：**{total_7d_dist:.2f}** km")
 
-with chart_tab3:
+# 重訓總量
+if show_gym_chart:
+    st.markdown("#### 🏋️ 近 7 天重訓總量")
     st.bar_chart(daily_summary, x="日期", y="重訓總量(kg)", color="#29B6F6")
-    total_7d_vol = daily_summary["重訓總量(kg)"].sum()
-    st.caption(f"近 7 天重訓總累積重量：**{total_7d_vol:.0f}** kg")
 
-with chart_tab4:
+# 重訓部位分布
+if show_part_chart:
+    st.markdown("#### 📊 近 7 天重訓部位分布")
     if not recent_workouts_df.empty and "body_part" in recent_workouts_df.columns:
         part_df = recent_workouts_df[recent_workouts_df["workout_type"] == "重訓"]
         if not part_df.empty:
             part_counts = part_df["body_part"].value_counts()
             st.bar_chart(part_counts)
-            st.caption("近 7 天重訓部位頻率分布")
         else:
             st.info("近 7 天尚無重訓資料。")
     else:
