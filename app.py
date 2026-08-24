@@ -23,7 +23,7 @@ def init_db():
             fat REAL
         )
     ''')
-    # 運動紀錄表 (升級版：包含慢跑與重訓專屬欄位)
+    # 運動紀錄表
     c.execute('''
         CREATE TABLE IF NOT EXISTS workouts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,8 +39,15 @@ def init_db():
             rpe REAL
         )
     ''')
+    # 設定值儲存表 (永久保存每日目標)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value REAL
+        )
+    ''')
     
-    # 自動補齊舊版資料庫可能缺失的欄位
+    # 自動補齊舊版 workouts 資料表可能缺失的欄位
     existing_cols = [col[1] for col in c.execute("PRAGMA table_info(workouts)").fetchall()]
     new_cols = {
         "workout_type": "TEXT",
@@ -55,6 +62,36 @@ def init_db():
         if col_name not in existing_cols:
             c.execute(f"ALTER TABLE workouts ADD COLUMN {col_name} {col_type}")
             
+    conn.commit()
+    conn.close()
+
+# --- 設定值 DB 操作 ---
+def get_target_settings():
+    default_targets = {
+        "target_cal": 2200.0,
+        "target_p": 140.0,
+        "target_carbs": 250.0,
+        "target_fat": 60.0
+    }
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT key, value FROM settings")
+    rows = c.fetchall()
+    conn.close()
+    
+    saved_settings = dict(rows)
+    for k, v in default_targets.items():
+        if k not in saved_settings:
+            saved_settings[k] = v
+    return saved_settings
+
+def save_target_settings(cal, p, carbs, fat):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_cal', ?)", (cal,))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_p', ?)", (p,))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_carbs', ?)", (carbs,))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('target_fat', ?)", (fat,))
     conn.commit()
     conn.close()
 
@@ -131,7 +168,6 @@ def get_all_logs():
     combined = pd.concat([logs_df, workouts_df]).sort_values(by=["log_date"], ascending=False)
     return combined
 
-# 工具函式：計算配速 (分/公里)
 def calculate_pace(distance, duration_min):
     if distance and duration_min and distance > 0 and duration_min > 0:
         pace_dec = duration_min / distance
@@ -153,12 +189,22 @@ st.set_page_config(page_title="每日營養與運動紀錄器", page_icon="🥗"
 
 st.title("🥗 每日營養與運動紀錄器")
 
-# 側邊欄：目標設定與資料備份
+# 讀取已儲存的目標設定
+saved_targets = get_target_settings()
+
+# 側邊欄：目標設定 (表單化儲存)
 st.sidebar.header("🎯 每日營養目標")
-target_cal = st.sidebar.number_input("目標熱量 (kcal)", value=2200, step=50)
-target_p = st.sidebar.number_input("目標蛋白質 (g)", value=140, step=5)
-target_carbs = st.sidebar.number_input("目標碳水化合物 (g)", value=250, step=5)
-target_fat = st.sidebar.number_input("目標脂肪 (g)", value=60, step=5)
+with st.sidebar.form("target_settings_form"):
+    target_cal = st.number_input("目標熱量 (kcal)", value=int(saved_targets["target_cal"]), step=50)
+    target_p = st.number_input("目標蛋白質 (g)", value=int(saved_targets["target_p"]), step=5)
+    target_carbs = st.number_input("目標碳水化合物 (g)", value=int(saved_targets["target_carbs"]), step=5)
+    target_fat = st.number_input("目標脂肪 (g)", value=int(saved_targets["target_fat"]), step=5)
+    
+    submit_targets = st.form_submit_button("💾 儲存目標設定", use_container_width=True)
+    if submit_targets:
+        save_target_settings(target_cal, target_p, target_carbs, target_fat)
+        st.sidebar.success("目標設定已成功永久保存！")
+        st.rerun()
 
 st.sidebar.divider()
 st.sidebar.header("💾 資料備份")
