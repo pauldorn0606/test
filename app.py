@@ -173,12 +173,13 @@ def get_shoe_mileage():
 def get_running_history():
     conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query(
-        "SELECT log_date, item, distance, duration_min, avg_hr, shoe FROM workouts WHERE workout_type = '慢跑' AND distance > 0 AND duration_min > 0",
+        "SELECT log_date, item, distance, duration_min, avg_hr, shoe FROM workouts WHERE workout_type = '慢跑' AND distance > 0 AND duration_min > 0 ORDER BY log_date DESC",
         conn
     )
     conn.close()
     if not df.empty:
         df["pace_decimal"] = df["duration_min"] / df["distance"]  # 分鐘/公里
+        df["配速"] = df.apply(lambda r: calculate_pace(r["distance"], r["duration_min"]), axis=1)
     return df
 
 # --- 歷史與匯出 ---
@@ -216,31 +217,6 @@ def calculate_pace(distance, duration_min):
             pace_sec = 0
         return f"{pace_min:02d}'{pace_sec:02d}\""
     return "-"
-
-# 下拉選單式日期選擇器（防鍵盤）
-def render_dropdown_date_picker():
-    st.write("📅 **選擇紀錄/查閱日期**")
-    today = date.today()
-    col_y, col_m, col_d = st.columns(3)
-    
-    with col_y:
-        selected_year = st.selectbox("年", list(range(today.year - 1, today.year + 2)), index=1, label_visibility="collapsed")
-    with col_m:
-        selected_month = st.selectbox("月", list(range(1, 13)), index=today.month - 1, label_visibility="collapsed")
-    
-    if selected_month in [1, 3, 5, 7, 8, 10, 12]:
-        max_days = 31
-    elif selected_month in [4, 6, 9, 11]:
-        max_days = 30
-    else:
-        is_leap = (selected_year % 4 == 0 and selected_year % 100 != 0) or (selected_year % 400 == 0)
-        max_days = 29 if is_leap else 28
-        
-    with col_d:
-        day_index = min(today.day - 1, max_days - 1)
-        selected_day = st.selectbox("日", list(range(1, max_days + 1)), index=day_index, label_visibility="collapsed")
-        
-    return date(selected_year, selected_month, selected_day)
 
 # 初始化資料庫
 init_db()
@@ -282,9 +258,9 @@ if not shoe_df.empty:
 else:
     st.sidebar.caption("尚無跑鞋紀錄")
 
-# 側邊欄：圖表顯示開關設定 (自訂欄位/隱藏功能)
+# 側邊欄：圖表顯示開關設定（已換成新的圖示 ⚙️）
 st.sidebar.divider()
-st.sidebar.header("👁️ 圖表顯示設定")
+st.sidebar.header("⚙️ 介面與圖表顯示設定")
 show_cal_chart = st.sidebar.checkbox("顯示 熱量與營養趨勢圖", value=True)
 show_pace_hr_chart = st.sidebar.checkbox("顯示 慢跑心率 vs. 配速散佈圖", value=True)
 show_run_chart = st.sidebar.checkbox("顯示 慢跑每週里程圖", value=True)
@@ -303,9 +279,9 @@ if not all_df.empty:
         mime="text/csv"
     )
 
-# 主畫面日期選擇器
+# 主畫面日期選擇器 (改回日曆視圖)
 st.divider()
-selected_date = render_dropdown_date_picker()
+selected_date = st.date_input("📅 選擇紀錄/查閱日期", value=date.today())
 date_str = selected_date.strftime("%Y-%m-%d")
 
 # -----------------------------------------------------------------------------
@@ -348,7 +324,7 @@ with tab_exercise:
             with col_a:
                 dist_in = st.number_input("跑步距離 (km)", min_value=0.0, value=None, placeholder="0.0", step=0.1)
                 duration_in = st.number_input("時間 (分鐘)", min_value=0.0, value=None, placeholder="0", step=1.0)
-                shoe_in = st.selectbox("使用跑鞋", ["Adidas Boston 13", "Adidas Adizero", "其他/不指定"])
+                shoe_in = st.selectbox("使用跑鞋", ["Adidas Boston 13", "Adidas Adizero", "Ricoh / 其他", "不指定"])
             with col_b:
                 hr_in = st.number_input("平均心率 (bpm)", min_value=0, value=None, placeholder="0", step=1)
                 cal_burned_in = st.number_input("消耗熱量 (kcal)", min_value=0.0, value=None, placeholder="0", step=10.0)
@@ -485,7 +461,7 @@ with list_tab2:
         st.info("當天尚無運動紀錄。")
 
 # -----------------------------------------------------------------------------
-# 6. 趨勢與進階分析圖表 (可自由控制開關)
+# 6. 趨勢與進階分析圖表 (控制開關與慢跑日期顯示)
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📈 歷史數據與慢跑進階分析")
@@ -519,7 +495,7 @@ if show_cal_chart:
     st.line_chart(daily_summary, x="日期", y="攝取熱量(kcal)", color="#FF4B4B")
     st.line_chart(daily_summary, x="日期", y=["蛋白質(g)", "碳水(g)", "脂肪(g)"])
 
-# 慢跑配速 vs. 心率散佈圖
+# 慢跑配速 vs. 心率散佈圖（包含完整日期與對照明細表）
 if show_pace_hr_chart:
     st.markdown("#### 🏃 慢跑心率 vs. 配速散佈圖 (心肺效率)")
     run_hist_df = get_running_history()
@@ -531,6 +507,12 @@ if show_pace_hr_chart:
             y="pace_decimal",
             color="shoe" if "shoe" in run_hist_df.columns else None
         )
+        
+        # 新增：包含日期的詳細數據明細表
+        with st.expander("📄 檢視慢跑歷史數據明細 (含日期、配速、心率)"):
+            display_run_df = run_hist_df[["log_date", "item", "distance", "配速", "avg_hr", "shoe"]].copy()
+            display_run_df.columns = ["日期", "項目", "距離(km)", "平均配速", "平均心率(bpm)", "使用跑鞋"]
+            st.dataframe(display_run_df, use_container_width=True)
     else:
         st.info("尚無包含平均心率的慢跑紀錄，填寫心率後即可自動生成散佈圖。")
 
