@@ -5,6 +5,12 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
+# 導入拖曳套件 (若未安裝請先執行 pip install streamlit-sortable)
+try:
+    from streamlit_sortable import sortable
+except ImportError:
+    st.error("請先安裝拖曳套件： pip install streamlit-sortable")
+
 # -----------------------------------------------------------------------------
 # 1. 資料庫初始化與操作函式
 # -----------------------------------------------------------------------------
@@ -13,7 +19,6 @@ DB_FILE = "nutrition_logs.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # 飲食紀錄表
     c.execute('''
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,7 +30,6 @@ def init_db():
             fat REAL
         )
     ''')
-    # 運動紀錄表
     c.execute('''
         CREATE TABLE IF NOT EXISTS workouts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +46,6 @@ def init_db():
             shoe TEXT
         )
     ''')
-    # 體重紀錄表
     c.execute('''
         CREATE TABLE IF NOT EXISTS weight_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +54,6 @@ def init_db():
             note TEXT
         )
     ''')
-    # 設定值儲存表
     c.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -59,7 +61,6 @@ def init_db():
         )
     ''')
     
-    # 動態補齊 workout 新欄位
     existing_cols = [col[1] for col in c.execute("PRAGMA table_info(workouts)").fetchall()]
     new_cols = {
         "workout_type": "TEXT",
@@ -185,7 +186,7 @@ def delete_workout(workout_id):
     conn.commit()
     conn.close()
 
-# --- 當月跑量統計 ---
+# --- 跑量與跑鞋統計 ---
 def get_monthly_running_distance(target_date):
     conn = sqlite3.connect(DB_FILE)
     first_day = date(target_date.year, target_date.month, 1)
@@ -260,49 +261,56 @@ def calculate_pace(distance, duration_min):
         return f"{pace_min:02d}'{pace_sec:02d}\""
     return "-"
 
-# 初始化資料庫
 init_db()
 
 # -----------------------------------------------------------------------------
-# 2. Streamlit 介面配置與灰藍色 CSS 主題覆蓋
+# 2. Streamlit 介面與灰藍色樣式覆蓋
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="每日營養與運動紀錄器", page_icon="🥗", layout="centered")
 
-# 全域灰藍色主題 CSS 覆蓋
+# 全域灰藍色 CSS 主題與拖曳區塊專用樣式
 st.markdown("""
     <style>
-    /* 主色調：灰藍色 (#5A738E) / 暗灰藍 (#4A607A) / 淺灰藍 (#EBF0F5) */
+    /* 灰藍色主題色系定義 */
+    :root {
+        --slate-blue: #5A738E;
+        --slate-dark: #4A607A;
+        --slate-light: #F1F5F9;
+    }
     
-    /* Multiselect 選項標籤 (Tags) 統一灰藍色 */
-    span[data-baseweb="tag"] {
-        background-color: #5A738E !important;
-        color: #ffffff !important;
+    /* 側邊欄拖曳列表樣式自訂 */
+    div[data-testid="stSidebar"] ul {
+        background-color: var(--slate-light) !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 8px !important;
+        padding: 8px !important;
+    }
+    
+    /* 拖曳選項按鈕改為灰藍色調 */
+    div[data-testid="stSidebar"] ul li {
+        background-color: var(--slate-blue) !important;
+        color: white !important;
+        font-weight: 500 !important;
         border-radius: 6px !important;
-        padding: 5px 10px !important;
+        margin-bottom: 6px !important;
+        padding: 8px 12px !important;
         cursor: grab !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
     
-    /* 側邊欄 Multiselect 控制盒拉長高 */
-    div[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-        min-height: 240px !important;
-        background-color: #F8FAFC !important;
-        border: 1.5px solid #CBD5E1 !important;
-        border-radius: 8px !important;
-        align-items: flex-start !important;
+    div[data-testid="stSidebar"] ul li:active {
+        cursor: grabbing !important;
+        background-color: var(--slate-dark) !important;
     }
-    
-    /* 按鈕與提示框灰藍色調 */
-    .stButton > button {
-        border-radius: 8px !important;
-    }
+
+    /* 按鈕與進度條灰藍色系 */
     .stButton > button[kind="primary"] {
-        background-color: #5A738E !important;
-        border-color: #5A738E !important;
+        background-color: var(--slate-blue) !important;
+        border-color: var(--slate-blue) !important;
     }
     
-    /* 進度條改為灰藍色 */
     .stProgress > div > div > div > div {
-        background-color: #5A738E !important;
+        background-color: var(--slate-blue) !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -325,15 +333,15 @@ with st.sidebar.form("target_settings_form"):
         st.sidebar.success("目標設定已成功更新！")
         st.rerun()
 
-# 側邊欄：拉長區塊與支援拖曳的順序設定
+# 側邊欄：使用 sortable 實現真正的滑鼠拖曳排序
 st.sidebar.divider()
-st.sidebar.header("🔀 畫面區塊顯示與順序設定")
-st.sidebar.caption("💡 **如何調整順序**：滑鼠按住灰藍色標籤**直接拖曳**即可調整上下顯示順序；點擊 'x' 可隱藏區塊。")
+st.sidebar.header("🔀 畫面區塊順序設定")
+st.sidebar.caption("💡 **拖曳排序**：滑鼠按住灰藍色區塊**直接上下拖曳**即可調整畫面順序。")
 
-ALL_SECTIONS = [
+ALL_SECTIONS_DEFAULT = [
     "新增紀錄區塊",
     "當日攝取進度與目標",
-    "當月跑量統計區塊",
+    "當月跑量與跑鞋追蹤",
     "當日明細清單",
     "近30天體重趨勢圖",
     "熱量與營養趨勢圖",
@@ -343,33 +351,14 @@ ALL_SECTIONS = [
     "重訓部位分布圖"
 ]
 
-selected_sections = st.sidebar.multiselect(
-    "調整顯示與拖曳順序：",
-    options=ALL_SECTIONS,
-    default=[
-        "新增紀錄區塊",
-        "當日攝取進度與目標",
-        "當月跑量統計區塊",
-        "當日明細清單",
-        "近30天體重趨勢圖",
-        "熱量與營養趨勢圖",
-        "慢跑心率 vs. 配速散佈圖",
-        "慢跑近7天里程圖"
-    ]
-)
+# 初始化 session_state
+if "section_order" not in st.session_state:
+    st.session_state.section_order = ALL_SECTIONS_DEFAULT
 
-# 側邊欄：跑鞋履歷統計
-st.sidebar.divider()
-st.sidebar.header("👟 跑鞋退役里程追蹤")
-shoe_df = get_shoe_mileage()
-if not shoe_df.empty:
-    for _, row in shoe_df.iterrows():
-        s_name = row['shoe']
-        s_dist = row['total_dist']
-        st.sidebar.write(f"**{s_name}**: {s_dist:.1f} km / 600 km")
-        st.sidebar.progress(min(s_dist / 600.0, 1.0))
-else:
-    st.sidebar.caption("尚無跑鞋紀錄")
+# 繪製可拖曳的列表
+with st.sidebar:
+    sorted_sections = sortable(st.session_state.section_order, key="sidebar_sortable_sections")
+    st.session_state.section_order = sorted_sections
 
 st.sidebar.divider()
 st.sidebar.header("💾 資料備份")
@@ -389,7 +378,7 @@ selected_date = st.date_input("📅 選擇紀錄/查閱日期", value=date.today
 date_str = selected_date.strftime("%Y-%m-%d")
 
 # -----------------------------------------------------------------------------
-# 3. 區塊渲染邏輯（動態依據 selected_sections 順序繪製）
+# 3. 區塊渲染邏輯（依據拖曳後的排序動態呈現）
 # -----------------------------------------------------------------------------
 
 def render_add_records():
@@ -510,15 +499,33 @@ def render_daily_progress():
     m3.metric("碳水剩餘", f"{rem_carbs:.1f} g", delta=f"已攝取 {consumed_carbs:.1f}")
     m4.metric("脂肪剩餘", f"{rem_f:.1f} g", delta=f"已攝取 {consumed_f:.1f}")
 
-def render_monthly_run_stat():
-    monthly_dist, run_count = get_monthly_running_distance(selected_date)
-    last_day_of_month = calendar.monthrange(selected_date.year, selected_date.month)[1]
+def render_monthly_run_and_shoe():
+    """當月跑量統計 + 跑鞋累積里程追蹤 (合併顯示)"""
+    st.subheader(f"🏃 {selected_date.year} 年 {selected_date.month} 月跑量與跑鞋狀態")
     
-    st.subheader(f"🏃 {selected_date.year} 年 {selected_date.month} 月跑量統計")
-    col_run1, col_run2 = st.columns(2)
-    col_run1.metric("當月累積跑量", f"{monthly_dist:.2f} km")
-    col_run2.metric("當月跑步次數", f"{run_count} 次")
-    st.caption(f"📅 統計區間：{selected_date.year}-{selected_date.month:02d}-01 至 {selected_date.year}-{selected_date.month:02d}-{last_day_of_month:02d}")
+    col_left, col_right = st.columns([1, 1])
+
+    # 左側：當月跑量統計
+    with col_left:
+        monthly_dist, run_count = get_monthly_running_distance(selected_date)
+        last_day_of_month = calendar.monthrange(selected_date.year, selected_date.month)[1]
+        st.markdown("**📅 月跑量統計**")
+        st.metric("當月累積跑量", f"{monthly_dist:.2f} km")
+        st.metric("當月跑步次數", f"{run_count} 次")
+        st.caption(f"區間：{selected_date.year}-{selected_date.month:02d}-01 ~ {selected_date.year}-{selected_date.month:02d}-{last_day_of_month:02d}")
+
+    # 右側：跑鞋退役里程追蹤（顯示歷史累積，不隨月份篩選影響）
+    with col_right:
+        st.markdown("**👟 跑鞋總累積里程 (歷史全紀錄)**")
+        shoe_df = get_shoe_mileage()
+        if not shoe_df.empty:
+            for _, row in shoe_df.iterrows():
+                s_name = row['shoe']
+                s_dist = row['total_dist']
+                st.write(f"**{s_name}**: {s_dist:.1f} km / 600 km")
+                st.progress(min(s_dist / 600.0, 1.0))
+        else:
+            st.caption("尚無跑鞋里程紀錄")
 
 def render_daily_logs():
     logs_df = get_logs_by_date(date_str)
@@ -675,11 +682,11 @@ def render_part_chart():
     else:
         st.info("近 7 天尚無重訓資料。")
 
-# 區塊渲染對應表
+# 區塊對應名稱
 SECTION_MAP = {
     "新增紀錄區塊": render_add_records,
     "當日攝取進度與目標": render_daily_progress,
-    "當月跑量統計區塊": render_monthly_run_stat,
+    "當月跑量與跑鞋追蹤": render_monthly_run_and_shoe,
     "當日明細清單": render_daily_logs,
     "近30天體重趨勢圖": render_weight_chart,
     "熱量與營養趨勢圖": render_cal_chart,
@@ -689,8 +696,8 @@ SECTION_MAP = {
     "重訓部位分布圖": render_part_chart,
 }
 
-# 依據使用者自訂的順序繪製介面
-for section_name in selected_sections:
+# 按拖曳後的順序動態渲染區塊
+for section_name in st.session_state.section_order:
     st.divider()
     if section_name in SECTION_MAP:
         SECTION_MAP[section_name]()
