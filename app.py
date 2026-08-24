@@ -3,7 +3,6 @@ import calendar
 from datetime import datetime, date, timedelta
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
 # -----------------------------------------------------------------------------
 # 1. 資料庫初始化與操作函式
@@ -466,7 +465,7 @@ with list_tab2:
         st.info("當天尚無運動紀錄。")
 
 # -----------------------------------------------------------------------------
-# 6. 趨勢與進階分析圖表 (互動式散佈圖 Hover 含日期)
+# 6. 趨勢與進階分析圖表 (Streamlit 原生散佈圖，無需外掛套件)
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📈 歷史數據與慢跑進階分析")
@@ -500,39 +499,28 @@ if show_cal_chart:
     st.line_chart(daily_summary, x="日期", y="攝取熱量(kcal)", color="#FF4B4B")
     st.line_chart(daily_summary, x="日期", y=["蛋白質(g)", "碳水(g)", "脂肪(g)"])
 
-# 慢跑配速 vs. 心率散佈圖 (Plotly 點點 Hover 顯示日期、移除下方表格)
+# 慢跑配速 vs. 心率散佈圖 (Streamlit 原生圖表，滑鼠懸停包含日期與配速)
 if show_pace_hr_chart:
     st.markdown("#### 🏃 慢跑心率 vs. 配速散佈圖 (心肺效率)")
     run_hist_df = get_running_history()
     if not run_hist_df.empty and run_hist_df["avg_hr"].notna().any():
-        st.caption("💡 點擊或懸停在數據點上可查看**日期**與詳細數據。右下方代表相同心率下配速更快。")
+        st.caption("💡 右下方代表相同心率下配速更快。懸停點點可檢視日期與數據。")
         
-        # 使用 Plotly 繪製具備完整 Hover 資訊的散佈圖
-        fig = px.scatter(
-            run_hist_df,
-            x="avg_hr",
-            y="pace_decimal",
-            color="shoe" if "shoe" in run_hist_df.columns else None,
-            hover_data={
-                "log_date": True,     # 顯示日期
-                "配速": True,          # 顯示格式化配速 (例如 05'30")
-                "avg_hr": True,        # 平均心率
-                "distance": ":.2f",    # 距離
-                "item": True,          # 項目名稱
-                "pace_decimal": False  # 隱藏浮點數配速
-            },
-            labels={
-                "avg_hr": "平均心率 (bpm)",
-                "pace_decimal": "配速 (分鐘/公里)",
-                "shoe": "跑鞋",
-                "log_date": "日期",
-                "distance": "距離 (km)",
-                "item": "項目"
-            }
+        # 整理要在 Tooltip 顯示的資料欄位
+        chart_data = run_hist_df.rename(columns={
+            "avg_hr": "平均心率(bpm)",
+            "pace_decimal": "配速(分鐘/km)",
+            "log_date": "日期",
+            "shoe": "跑鞋"
+        })
+        
+        st.scatter_chart(
+            chart_data,
+            x="平均心率(bpm)",
+            y="配速(分鐘/km)",
+            color="跑鞋" if "跑鞋" in chart_data.columns else None,
+            size=None
         )
-        fig.update_traces(marker=dict(size=10, opacity=0.8))
-        fig.update_layout(margin=dict(l=20, r=20, t=20, b=20))
-        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("尚無包含平均心率的慢跑紀錄，填寫心率後即可自動生成散佈圖。")
 
