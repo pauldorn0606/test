@@ -1357,7 +1357,7 @@ def render_cal_chart():
 # =============================================================================
 def main():
     st.set_page_config(
-        page_title="PAUL個人健康與健身數據看板", page_icon="🏋️", layout="wide"
+        page_title="TIFF個人健康與健身數據看板", page_icon="🏋️", layout="wide"
     )
     init_db()
 
@@ -1381,7 +1381,7 @@ def main():
     target_fat = st.sidebar.number_input("脂肪目標 (g)", value=55.0, step=5.0)
 
     # 頂部抬頭
-    st.title("🏋️ PAUL個人健康 & 運動數據看板")
+    st.title("🏋️ TIFF個人健康 & 運動數據看板")
 
     # 區塊與對應渲染函式的映射字典
     section_mapping = {
