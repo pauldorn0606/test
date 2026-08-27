@@ -482,10 +482,11 @@ def render_add_records(date_str):
                 with c_info:
                     calc_cal = f_info["calories"] * servings
                     calc_p = f_info["protein"] * servings
-                    calc_c = f_info["carbs"] * servings
                     calc_f = f_info["fat"] * servings
+                    calc_c = f_info["carbs"] * servings
+                    
                     st.caption(
-                        f"🔥 熱量: **{calc_cal:.0f}** kcal | P: **{calc_p:.1f}**g | C: **{calc_c:.1f}**g | F: **{calc_f:.1f}**g"
+                        f"🔥 熱量: **{calc_cal:.0f}** kcal | P: **{calc_p:.1f}**g | F: **{calc_f:.1f}**g | C: **{calc_c:.1f}**g"
                     )
 
                 if st.button("📥 快速加入飲食紀錄", use_container_width=True):
@@ -538,7 +539,7 @@ def render_add_records(date_str):
 
         with st.form("add_workout_form", clear_on_submit=True):
             if w_type_sel == "慢跑":
-                workout_name = st.text_input("慢跑名稱", value="路跑 / 慢跑")
+                workout_name = st.text_input("慢跑名稱", value="慢跑")
                 col_r1, col_r2 = st.columns(2)
                 with col_r1:
                     run_dist = st.number_input(
@@ -584,7 +585,7 @@ def render_add_records(date_str):
                     st.rerun()
 
             elif w_type_sel == "重訓/健身":
-                workout_name = st.text_input("訓練名稱", value="力量訓練")
+                workout_name = st.text_input("訓練名稱", value="重量訓練")
                 body_opts = [
                     "胸部",
                     "背部",
@@ -592,7 +593,7 @@ def render_add_records(date_str):
                     "肩部",
                     "手臂",
                     "核心",
-                    "全身/其他",
+                    "其他",
                 ]
                 body_part_in = st.selectbox("主要訓練部位", body_opts)
                 notes_in = st.text_area(
@@ -721,8 +722,8 @@ def render_add_records(date_str):
                             f"**{f_row['name']}** ({f_row['serving_unit']}) — "
                             f"{f_row['calories']:.0f} kcal | "
                             f"P: {f_row['protein']:.1f}g | "
-                            f"C: {f_row['carbs']:.1f}g | "
-                            f"F: {f_row['fat']:.1f}g"
+                            f"F: {f_row['fat']:.1f}g | "
+                            f"C: {f_row['carbs']:.1f}g"
                         )
                     with col_edit:
                         if st.button("✏️ 編輯", key=f"btn_edit_db_food_{f_id}"):
@@ -759,17 +760,17 @@ def render_add_records(date_str):
                                     step=0.5,
                                 )
                             with col_e2:
-                                e_c = st.number_input(
-                                    "碳水 (g)",
-                                    value=float(f_row["carbs"]),
-                                    step=0.5,
-                                )
                                 e_f = st.number_input(
                                     "脂肪 (g)",
                                     value=float(f_row["fat"]),
                                     step=0.5,
                                 )
-
+                                e_c = st.number_input(
+                                    "碳水 (g)",
+                                    value=float(f_row["carbs"]),
+                                    step=0.5,
+                                )
+                                
                             if st.form_submit_button("💾 儲存修改"):
                                 ok, msg = update_food_item(
                                     f_id,
@@ -798,18 +799,17 @@ def render_add_records(date_str):
             with st.form("db_food_form", clear_on_submit=True):
                 f_name = st.text_input("食物名稱 (例如: 醬燒雞腿飯)")
                 f_unit = st.text_input(
-                    "單位描述 (例如: 100g、一份、碗)", value="份"
+                    "單位描述 (例如: 100g、一份、碗)", value=None
                 )
                 col_d1, col_d2 = st.columns(2)
                 with col_d1:
                     f_cal = st.number_input(
-                        "每單位熱量 (kcal)", min_value=0.0, step=5.0
+                        "每單位熱量 (kcal)", min_value=0.0, value=None, placeholder="0", step=5.0
                     )
-                    f_p = st.number_input("蛋白質 (g)", min_value=0.0, step=0.5)
+                    f_p = st.number_input("蛋白質 (g)", min_value=0.0, value=None, placeholder="0", step=0.5)
                 with col_d2:
-                    f_c = st.number_input("碳水 (g)", min_value=0.0, step=0.5)
-                    f_f = st.number_input("脂肪 (g)", min_value=0.0, step=0.5)
-
+                    f_f = st.number_input("脂肪 (g)", min_value=0.0, value=None, placeholder="0", step=0.5)
+                    f_c = st.number_input("碳水 (g)", min_value=0.0, value=None, placeholder="0", step=0.5)
                 if st.form_submit_button("💾 儲存至食物資料庫"):
                     if f_name.strip():
                         ok, msg = add_food_item(
@@ -837,9 +837,9 @@ def render_daily_progress(
 
     tot_cal = logs_df["calories"].sum() if not logs_df.empty else 0.0
     tot_p = logs_df["protein"].sum() if not logs_df.empty else 0.0
-    tot_c = logs_df["carbs"].sum() if not logs_df.empty else 0.0
     tot_f = logs_df["fat"].sum() if not logs_df.empty else 0.0
-
+    tot_c = logs_df["carbs"].sum() if not logs_df.empty else 0.0
+    
     burned_cal = (
         workouts_df["calories_burned"].sum() if not workouts_df.empty else 0.0
     )
@@ -858,22 +858,22 @@ def render_daily_progress(
         delta=f"{tot_p - target_p:.1f} g",
     )
     c4.metric(
-        "碳水化合物",
-        f"{tot_c:.1f} g",
-        delta=f"{tot_c - target_carbs:.1f} g",
-    )
-    c5.metric(
         "脂肪",
         f"{tot_f:.1f} g",
         delta=f"{tot_f - target_fat:.1f} g",
     )
-
+    c5.metric(
+        "碳水化合物",
+        f"{tot_c:.1f} g",
+        delta=f"{tot_c - target_carbs:.1f} g",
+    )
+    
     p_cal_ratio = (tot_p * 4 / tot_cal * 100) if tot_cal > 0 else 0
-    c_cal_ratio = (tot_c * 4 / tot_cal * 100) if tot_cal > 0 else 0
     f_cal_ratio = (tot_f * 9 / tot_cal * 100) if tot_cal > 0 else 0
-
+    c_cal_ratio = (tot_c * 4 / tot_cal * 100) if tot_cal > 0 else 0
+    
     st.caption(
-        f"💡 今日淨熱量: **{net_cal:.0f}** kcal | 三大營養素熱量佔比 — 蛋白質: **{p_cal_ratio:.1f}%** | 碳水: **{c_cal_ratio:.1f}%** | 脂肪: **{f_cal_ratio:.1f}%**"
+        f"💡 今日淨熱量: **{net_cal:.0f}** kcal | 三大營養素熱量佔比 — 蛋白質: **{p_cal_ratio:.1f}%** | 脂肪: **{f_cal_ratio:.1f}%** | 碳水: **{c_cal_ratio:.1f}%**"
     )
 
 
@@ -938,7 +938,7 @@ def render_daily_logs(date_str):
                 col_info, col_edit, col_del = st.columns([3.5, 0.8, 0.8])
                 with col_info:
                     st.write(
-                        f"**{row['item']}** — {row['calories']:.0f} kcal | P: {row['protein']:.1f}g | C: {row['carbs']:.1f}g | F: {row['fat']:.1f}g"
+                        f"**{row['item']}** — {row['calories']:.0f} kcal | P: {row['protein']:.1f}g | F: {row['fat']:.1f}g | C: {row['carbs']:.1f}g"
                     )
                 with col_edit:
                     if st.button("✏️ 編輯", key=f"btn_edit_food_{log_id}"):
@@ -969,18 +969,17 @@ def render_daily_logs(date_str):
                                 value=float(row["protein"]),
                                 step=1.0,
                             )
-                        with col_e2:
-                            e_c = st.number_input(
-                                "碳水 (g)",
-                                value=float(row["carbs"]),
-                                step=1.0,
-                            )
+                        with col_e2: 
                             e_f = st.number_input(
                                 "脂肪 (g)",
                                 value=float(row["fat"]),
                                 step=1.0,
                             )
-
+                            e_c = st.number_input(
+                                "碳水 (g)",
+                                value=float(row["carbs"]),
+                                step=1.0,
+                            )
                         if st.form_submit_button("💾 儲存變更"):
                             update_log(
                                 log_id, e_item.strip(), e_cal, e_p, e_c, e_f
@@ -1358,7 +1357,7 @@ def render_cal_chart():
 # =============================================================================
 def main():
     st.set_page_config(
-        page_title="TIFF個人健康與健身數據看板", page_icon="🏋️", layout="wide"
+        page_title="PAUL個人健康與健身數據看板", page_icon="🏋️", layout="wide"
     )
     init_db()
 
@@ -1371,18 +1370,18 @@ def main():
     st.sidebar.divider()
     st.sidebar.subheader("🎯 每日營養目標")
     target_cal = st.sidebar.number_input(
-        "目標熱量 (kcal)", value=1700, step=50
+        "目標熱量 (kcal)", value=2200, step=50
     )
     target_p = st.sidebar.number_input(
         "蛋白質目標 (g)", value=120.0, step=5.0
     )
     target_carbs = st.sidebar.number_input(
-        "碳水目標 (g)", value=180.0, step=5.0
+        "碳水目標 (g)", value=300.0, step=5.0
     )
-    target_fat = st.sidebar.number_input("脂肪目標 (g)", value=55.0, step=5.0)
+    target_fat = st.sidebar.number_input("脂肪目標 (g)", value=65.0, step=5.0)
 
     # 頂部抬頭
-    st.title("🏋️ TIFF個人健康 & 運動數據看板")
+    st.title("🏋️ PAUL個人健康 & 運動數據看板")
 
     # 區塊與對應渲染函式的映射字典
     section_mapping = {
